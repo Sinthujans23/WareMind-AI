@@ -63,6 +63,8 @@ class Robot:
     delivered: int = 0
     messages: list[str] = field(default_factory=list)
     charging: bool = False
+    waiting_ticks: int = 0
+    stuck: bool = False
     def bid(self, order, blocked=None):
         if (
             self.order_id is not None
@@ -258,8 +260,7 @@ class Warehouse:
                 robot.pos,
                 goal,
                 (reserved - {robot.pos}) | self.dynamic_obstacles
-)
-
+            )
 
             if len(route) > 1 and route[1] not in reserved:
                 reserved.remove(robot.pos)
@@ -270,6 +271,17 @@ class Warehouse:
                     0.0,
                     robot.battery - BATTERY_PER_MOVE
                 )
+                robot.waiting_ticks = 0
+                robot.stuck = False
+
+            else:
+                robot.waiting_ticks += 1
+
+                if robot.waiting_ticks >= 5 and not robot.stuck:
+                    robot.stuck = True
+                    self.events.append(
+                        f"Robot {robot.id} blocked for 5 ticks"
+                    )
 
         self.events = self.events[-12:]
 
