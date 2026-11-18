@@ -1,7 +1,10 @@
 """Run: python main.py. Press O to create an order, SPACE to pause, ESC to quit."""
 import random
+from mesa import model
 import pygame
 from waremind.core import Warehouse, WIDTH, HEIGHT, SHELVES, DEPOT, CHARGER
+from waremind.mesa_model import WarehouseMesaModel
+from waremind.messages import MessageType
 
 CELL = 46
 SIDE = 330
@@ -15,7 +18,9 @@ def main():
     font = pygame.font.SysFont('consolas', 18)
     small = pygame.font.SysFont('consolas', 15)
     clock = pygame.time.Clock()
-    world = Warehouse()
+
+    model = WarehouseMesaModel()
+    world = model.warehouse
     for p in [(7, 2), (13, 8), (2, 9)]:
         world.add_order(p)
     running = True; paused = False; frames = 0
@@ -30,7 +35,7 @@ def main():
                 world.add_order(random.choice(free))
         frames += 1
         if not paused and frames % 12 == 0:
-            world.step()
+           model.step()
         screen.fill((19, 27, 41))
         for y in range(HEIGHT):
             for x in range(WIDTH):
@@ -52,11 +57,34 @@ def main():
         lines = ['WAREMIND AI', '', f'Tick: {world.tick}', f'Orders delivered: {world.completed_count}/{len(world.orders)}', '', 'ROBOTS']
         for robot in world.robots:
             lines += [f'R{robot.id} | battery {robot.battery:.0f}%', f'   task: {robot.order_id or "idle"}']
-        lines += ['', 'EVENTS'] + [line[:37] for line in world.events[-6:]] + ['', '[O] Add order', '[SPACE] Pause/resume', '[ESC] Exit']
+        lines += ['', 'AGENT COMMUNICATION']
+
+        for msg in model.bus.history[-3:]:
+            lines.append(
+                f'{msg.type.value}: R{msg.sender}->R{msg.receiver} O{msg.order_id}'
+            )
+
+        lines += ['', 'EVENTS']
+
+        for event_text in world.events[-2:]:
+            lines.append(event_text[:37])
+
+        lines += [
+            '',
+            '[O] Add order',
+            '[SPACE] Pause/resume',
+            '[ESC] Exit'
+        ]
+
         for i, line in enumerate(lines):
-            screen.blit(small.render(line, True, (224, 234, 244)), (ox, 12 + i * 21))
+            screen.blit(
+                small.render(line, True, (224, 234, 244)),
+                (ox, 12 + i * 21)
+            )
+
         pygame.display.flip()
         clock.tick(30)
+
     pygame.quit()
 
 
