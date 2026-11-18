@@ -62,8 +62,10 @@ class Robot:
     def bid(self, order):
         if self.order_id is not None or self.battery < 20:
             return None
-        p1 = pathfind(self.pos, order.pickup)
-        p2 = pathfind(order.pickup, order.destination)
+        from .navigation import astar
+
+        p1 = astar(self.pos, order.pickup)
+        p2 = astar(order.pickup, order.destination)
         if not p1 or not p2:
             return None
         travel = len(p1) + len(p2) - 2
@@ -121,7 +123,9 @@ class Warehouse:
                     robot.carrying = True
                     self.events.append(f'Robot {robot.id} picked up order {order.id}')
                 continue
-            route = pathfind(robot.pos, goal, reserved - {robot.pos})
+            from .navigation import astar
+
+            route = astar(robot.pos, goal, reserved - {robot.pos})
             if len(route) > 1 and route[1] not in reserved:
                 reserved.remove(robot.pos)
                 robot.pos = route[1]
