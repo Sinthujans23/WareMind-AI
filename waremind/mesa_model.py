@@ -29,7 +29,10 @@ class WarehouseRobotAgent(mesa.Agent):
         for msg in self.model.bus.receive(self.robot_id):
             if msg.type == MessageType.CFP:
                 order = self.model.get_order(msg.order_id)
-                cost = self.robot.bid(order)
+                cost = self.robot.bid(
+                order,
+                self.model.warehouse.dynamic_obstacles
+)
 
                 if cost is not None:
                     self.model.bus.send(
