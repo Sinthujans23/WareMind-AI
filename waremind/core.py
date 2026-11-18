@@ -11,7 +11,10 @@ WIDTH, HEIGHT = 16, 12
 SHELVES = {(x, y) for x in (4, 5, 10, 11) for y in (3, 4, 5, 7, 8)}
 DEPOT = (1, 1)
 CHARGER = (14, 10)
-
+LOW_BATTERY = 25.0
+FULL_BATTERY = 100.0
+BATTERY_PER_MOVE = 0.5
+CHARGE_PER_TICK = 10.0
 
 def neighbors(pos):
     x, y = pos
@@ -58,10 +61,10 @@ class Robot:
     carrying: bool = False
     delivered: int = 0
     messages: list[str] = field(default_factory=list)
-
+    charging: bool = False
     def bid(self, order):
-        if self.order_id is not None or self.battery < 20:
-            return None
+        if self.order_id is not None or self.charging or self.battery < LOW_BATTERY:
+          return None
         from .navigation import astar
 
         p1 = astar(self.pos, order.pickup)
@@ -102,36 +105,132 @@ class Warehouse:
             winner.order_id = order.id
             order.assigned_to = winner.id
             self.events.append(f'CFP order {order.id}: robot {winner.id} won task auction')
+    
+    def manage_charging(self, robot, reserved):
+        """Handle charging for an idle robot."""
 
+        from .navigation import astar
+
+        if robot.order_id is not None:
+            return False
+
+        if robot.battery < LOW_BATTERY:
+            robot.charging = True
+
+        if not robot.charging:
+            return False
+
+        if robot.pos == CHARGER:
+            robot.battery = min(
+                FULL_BATTERY,
+                robot.battery + CHARGE_PER_TICK
+            )
+
+            if robot.battery >= FULL_BATTERY:
+                robot.charging = False
+                self.events.append(
+                    f"Robot {robot.id} fully charged"
+                )
+            return True
+
+        route = astar(
+            robot.pos,
+            CHARGER,
+            reserved - {robot.pos}
+        )
+
+        if len(route) > 1 and route[1] not in reserved:
+            reserved.remove(robot.pos)
+            robot.pos = route[1]
+            reserved.add(robot.pos)
+
+            robot.battery = max(
+                0.0,
+                robot.battery - BATTERY_PER_MOVE
+            )
+
+        return True
+
+    
     def step(self):
         self.tick += 1
-        self.allocate()
+
         reserved = {robot.pos for robot in self.robots}
+
+        # Mark idle low-battery robots before task allocation.
         for robot in self.robots:
+            if robot.order_id is None and robot.battery < LOW_BATTERY:
+                robot.charging = True
+
+        self.allocate()
+
+        for robot in self.robots:
+
+            # Charging takes priority for idle robots.
+            if self.manage_charging(robot, reserved):
+                continue
+
             if robot.order_id is None:
                 continue
-            order = next(o for o in self.orders if o.id == robot.order_id)
-            goal = order.destination if robot.carrying else order.pickup
+
+            order = next(
+                (o for o in self.orders if o.id == robot.order_id),
+                None
+            )
+
+            if order is None:
+                self.events.append(
+                    f"Robot {robot.id}: invalid order"
+                )
+                robot.order_id = None
+                robot.carrying = False
+                continue
+
+            goal = (
+                order.destination
+                if robot.carrying
+                else order.pickup
+            )
+
             if robot.pos == goal:
+
                 if robot.carrying:
                     order.completed = True
                     robot.delivered += 1
                     robot.order_id = None
                     robot.carrying = False
-                    self.events.append(f'Order {order.id} delivered by robot {robot.id}')
+
+                    self.events.append(
+                        f"Order {order.id} delivered by robot {robot.id}"
+                    )
                 else:
                     robot.carrying = True
-                    self.events.append(f'Robot {robot.id} picked up order {order.id}')
+                    self.events.append(
+                        f"Robot {robot.id} picked up order {order.id}"
+                    )
+
                 continue
+
             from .navigation import astar
 
-            route = astar(robot.pos, goal, reserved - {robot.pos})
+            route = astar(
+                robot.pos,
+                goal,
+                reserved - {robot.pos}
+            )
+
             if len(route) > 1 and route[1] not in reserved:
                 reserved.remove(robot.pos)
                 robot.pos = route[1]
                 reserved.add(robot.pos)
-                robot.battery = max(0.0, robot.battery - 0.5)
+
+                robot.battery = max(
+                    0.0,
+                    robot.battery - BATTERY_PER_MOVE
+                )
+
         self.events = self.events[-12:]
+
 
     @property
     def completed_count(self):
