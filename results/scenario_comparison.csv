@@ -1,0 +1,4 @@
+scenario,total_orders,completed_orders,completion_rate,simulation_ticks,average_completion_tick,messages_sent,recoveries,stuck_robots
+3_orders,3,3,100.0,30,21.33,24,0,0
+5_orders,5,5,100.0,50,31.2,138,0,0
+10_orders,10,10,100.0,116,58.1,945,0,0

@@ -95,6 +95,7 @@ class Warehouse:
         self.tick = 0
         self.events = []
         self._next_order_id = 1
+        self.recovery_count = 0
     
     def add_obstacle(self, pos):
         """Add a temporary obstacle to an accessible, empty cell."""
@@ -258,7 +259,7 @@ class Warehouse:
                 0.0,
                 blocker.battery - BATTERY_PER_MOVE
             )
-
+            self.recovery_count += 1
             self.events.append(
                 f"Robot {blocker.id} yielded to Robot {robot.id}"
             )
@@ -267,11 +268,98 @@ class Warehouse:
 
         return False
     
+    def clear_depot(self, reserved):
+        """Move an idle robot away from the depot to allow deliveries."""
+        from .navigation import astar
+
+        depot_robot = next(
+            (
+                robot
+                for robot in self.robots
+                if robot.pos == DEPOT
+                and robot.order_id is None
+                and not robot.charging
+            ),
+            None
+        )
+
+        if depot_robot is None:
+            return False
+
+        # Search for a safe parking cell.
+        candidates = []
+
+        for x in range(WIDTH):
+            for y in range(HEIGHT):
+                pos = (x, y)
+
+                if pos in SHELVES:
+                    continue
+
+                if pos in self.dynamic_obstacles:
+                    continue
+
+                if pos in reserved:
+                    continue
+
+                if pos in (DEPOT, CHARGER):
+                    continue
+
+                if any(
+                    not order.completed and order.pickup == pos
+                    for order in self.orders
+                ):
+                    continue
+
+                candidates.append(pos)
+
+        # Prefer nearby parking locations.
+        candidates.sort(
+            key=lambda pos: (
+                abs(pos[0] - DEPOT[0])
+                + abs(pos[1] - DEPOT[1])
+            )
+        )
+
+        for target in candidates:
+            route = astar(
+                depot_robot.pos,
+                target,
+                (reserved - {depot_robot.pos})
+                | self.dynamic_obstacles
+            )
+
+            if len(route) < 2:
+                continue
+
+            next_cell = route[1]
+
+            if next_cell in reserved:
+                continue
+
+            reserved.remove(depot_robot.pos)
+            depot_robot.pos = next_cell
+            reserved.add(next_cell)
+
+            depot_robot.battery = max(
+                0.0,
+                depot_robot.battery - BATTERY_PER_MOVE
+            )
+
+            self.events.append(
+                f"Robot {depot_robot.id} cleared depot"
+            )
+
+            return True
+
+        return False
+
     
     def step(self):
         self.tick += 1
 
         reserved = {robot.pos for robot in self.robots}
+        self.clear_depot(reserved)
 
         # Mark low-battery idle robots for charging.
         for robot in self.robots:
