@@ -195,21 +195,95 @@ class Warehouse:
         return True
 
     
+    def recover_blocked_robot(self, robot, reserved):
+        """Move one idle blocking robot aside when a task robot is stuck."""
+        from .navigation import astar
+
+        if robot.order_id is None or not robot.stuck:
+            return False
+
+        order = next(
+            (o for o in self.orders if o.id == robot.order_id),
+            None
+        )
+
+        if order is None:
+            return False
+
+        goal = order.destination if robot.carrying else order.pickup
+
+        # Find a route ignoring other robots, but not obstacles.
+        ideal_route = astar(
+            robot.pos,
+            goal,
+            self.dynamic_obstacles
+        )
+
+        if len(ideal_route) < 2:
+            return False
+
+        next_cell = ideal_route[1]
+
+        blocker = next(
+            (
+                other for other in self.robots
+                if other.id != robot.id and other.pos == next_cell
+            ),
+            None
+        )
+
+        # Only move idle robots that are not charging.
+        if blocker is None or blocker.order_id is not None or blocker.charging:
+            return False
+
+        for candidate in neighbors(blocker.pos):
+            if candidate in reserved:
+                continue
+
+            if candidate in self.dynamic_obstacles:
+                continue
+
+            if candidate == robot.pos:
+                continue
+
+            if candidate in (DEPOT, CHARGER):
+                continue
+
+            # Move blocker to an empty adjacent cell.
+            reserved.remove(blocker.pos)
+            blocker.pos = candidate
+            reserved.add(candidate)
+
+            blocker.battery = max(
+                0.0,
+                blocker.battery - BATTERY_PER_MOVE
+            )
+
+            self.events.append(
+                f"Robot {blocker.id} yielded to Robot {robot.id}"
+            )
+
+            return True
+
+        return False
+    
+    
     def step(self):
         self.tick += 1
 
         reserved = {robot.pos for robot in self.robots}
 
-        # Mark idle low-battery robots before task allocation.
+        # Mark low-battery idle robots for charging.
         for robot in self.robots:
             if robot.order_id is None and robot.battery < LOW_BATTERY:
                 robot.charging = True
 
+        # Allocate available orders.
         self.allocate()
 
         for robot in self.robots:
 
-            # Charging takes priority for idle robots.
+            # Charging logic for idle robots.
             if self.manage_charging(robot, reserved):
                 continue
 
@@ -227,6 +301,8 @@ class Warehouse:
                 )
                 robot.order_id = None
                 robot.carrying = False
+                robot.waiting_ticks = 0
+                robot.stuck = False
                 continue
 
             goal = (
@@ -235,6 +311,7 @@ class Warehouse:
                 else order.pickup
             )
 
+            # Robot has reached pickup or delivery destination.
             if robot.pos == goal:
 
                 if robot.carrying:
@@ -246,14 +323,19 @@ class Warehouse:
                     self.events.append(
                         f"Order {order.id} delivered by robot {robot.id}"
                     )
+
                 else:
                     robot.carrying = True
+
                     self.events.append(
                         f"Robot {robot.id} picked up order {order.id}"
                     )
 
+                robot.waiting_ticks = 0
+                robot.stuck = False
                 continue
 
+            # A* pathfinding with dynamic obstacle avoidance.
             from .navigation import astar
 
             route = astar(
@@ -263,6 +345,7 @@ class Warehouse:
             )
 
             if len(route) > 1 and route[1] not in reserved:
+
                 reserved.remove(robot.pos)
                 robot.pos = route[1]
                 reserved.add(robot.pos)
@@ -271,19 +354,29 @@ class Warehouse:
                     0.0,
                     robot.battery - BATTERY_PER_MOVE
                 )
+
                 robot.waiting_ticks = 0
                 robot.stuck = False
 
             else:
+                # Robot cannot move this tick.
                 robot.waiting_ticks += 1
 
-                if robot.waiting_ticks >= 5 and not robot.stuck:
-                    robot.stuck = True
-                    self.events.append(
-                        f"Robot {robot.id} blocked for 5 ticks"
-                    )
+                if robot.waiting_ticks >= 5:
 
+                    if not robot.stuck:
+                        robot.stuck = True
+
+                        self.events.append(
+                            f"Robot {robot.id} blocked for 5 ticks"
+                        )
+
+                    # Attempt safe idle-robot repositioning.
+                    self.recover_blocked_robot(robot, reserved)
+
+        # Keep only recent events.
         self.events = self.events[-12:]
+
 
 
     @property
