@@ -53,6 +53,8 @@ class Order:
     completed: bool = False
 
 
+
+
 @dataclass
 class Robot:
     id: int
@@ -65,28 +67,51 @@ class Robot:
     charging: bool = False
     waiting_ticks: int = 0
     stuck: bool = False
+
     def bid(self, order, blocked=None):
+        from .navigation import astar
+        from .safety_rules import evaluate_robot_safety
+
+        # Step 1: Check robot safety using Experta
+        actions = evaluate_robot_safety(
+            idle=self.order_id is None,
+            battery=self.battery,
+            charging=self.charging,
+        )
+
         if (
-            self.order_id is not None
-            or self.charging
-            or self.battery < LOW_BATTERY
+            "START_CHARGING" in actions
+            or "REJECT_NEW_TASK" in actions
         ):
             return None
 
-        from .navigation import astar
-
+        # Step 2: Calculate travel distance using A*
         p1 = astar(self.pos, order.pickup, blocked)
-        p2 = astar(order.pickup, order.destination, blocked)
+        p2 = astar(
+            order.pickup,
+            order.destination,
+            blocked,
+        )
 
         if not p1 or not p2:
             return None
 
         travel = len(p1) + len(p2) - 2
 
-        if self.battery < travel + 15:
+        # Step 3: Check required battery using Experta
+        actions = evaluate_robot_safety(
+            idle=self.order_id is None,
+            battery=self.battery,
+            charging=self.charging,
+            required_battery=travel + 15,
+        )
+
+        if "REJECT_NEW_TASK" in actions:
             return None
 
+        # Step 4: Calculate battery-aware bid score
         return travel + (100 - self.battery) * 0.12
+
 class Warehouse:
     def __init__(self):
         self.robots = [Robot(1, (2, 2)), Robot(2, (13, 2)), Robot(3, (8, 10))]

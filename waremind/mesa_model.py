@@ -2,7 +2,9 @@
 """Mesa 3.x multi-agent warehouse with message-based negotiation."""
 
 import mesa
-
+import random
+from .safety_rules import evaluate_robot_safety
+from .navigation import astar
 from .core import Warehouse
 from .messages import Message, MessageType
 from .negotiation import MessageBus, choose_winner
@@ -29,10 +31,27 @@ class WarehouseRobotAgent(mesa.Agent):
         for msg in self.model.bus.receive(self.robot_id):
             if msg.type == MessageType.CFP:
                 order = self.model.get_order(msg.order_id)
-                cost = self.robot.bid(
-                order,
-                self.model.warehouse.dynamic_obstacles
-)
+
+                blocked = self.model.warehouse.dynamic_obstacles
+
+                # First check basic safety rules.
+                actions = evaluate_robot_safety(
+                    idle=self.robot.order_id is None,
+                    battery=self.robot.battery,
+                    charging=self.robot.charging,
+                )
+
+                if "START_CHARGING" in actions:
+                    self.robot.charging = True
+
+                if (
+                    "REJECT_NEW_TASK" in actions
+                    or "START_CHARGING" in actions
+                ):
+                    continue
+
+                # Existing A* and battery feasibility checks.
+                cost = self.robot.bid(order, blocked)
 
                 if cost is not None:
                     self.model.bus.send(
@@ -66,9 +85,14 @@ class WarehouseRobotAgent(mesa.Agent):
 
 
 class WarehouseMesaModel(mesa.Model):
-    def __init__(self):
+    def __init__(self, strategy="battery_aware", seed=42):
         super().__init__()
 
+        if strategy not in {"random", "nearest", "battery_aware"}:
+            raise ValueError(f"Unknown strategy: {strategy}")
+
+        self.strategy = strategy
+        self.rng = random.Random(seed)
         self.warehouse = NegotiatedWarehouse()
         self.bus = MessageBus()
         self.bus.register(0)
@@ -139,7 +163,30 @@ class WarehouseMesaModel(mesa.Model):
                 )
             ]
 
-            winner = choose_winner(bids)
+            if self.strategy == "battery_aware":
+                winner = choose_winner(bids)
+
+            elif self.strategy == "random":
+                winner = self.rng.choice(bids) if bids else None
+
+            else:
+               winner = min(
+        bids,
+        key=lambda bid: (
+            len(
+                astar(
+                    next(
+                        robot.pos
+                        for robot in self.warehouse.robots
+                        if robot.id == bid.sender
+                    ),
+                    order.pickup,
+                    self.warehouse.dynamic_obstacles,
+                )
+            ) - 1,
+            bid.sender,
+        ),
+    ) if bids else None
 
             if winner is None:
                 continue

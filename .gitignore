@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
+
+waremind/mesa_model_backup.py
