@@ -1,4 +1,5 @@
 mesa>=3.0,<4
 pygame>=2.5,<3
 pytest>=8,<10
-matplotlib>=3.8,<4experta==1.9.4
+matplotlib>=3.8,<4
+experta==1.9.4

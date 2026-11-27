@@ -1,6 +1,7 @@
 
 """Regression tests for battery-aware task allocation."""
 
+from waremind.core import Order, Robot
 from waremind.mesa_model import WarehouseMesaModel
 
 
@@ -41,3 +42,10 @@ def test_full_battery_same_winner():
 
     assert assigned_robot("nearest", batteries) == 1
     assert assigned_robot("battery_aware", batteries) == 1
+
+
+def test_far_task_allowed_with_battery_distance_units():
+    robot = Robot(99, (0, 1), battery=57.5)
+    order = Order(1, (15, 8))
+
+    assert robot.bid(order) is not None

@@ -1,0 +1,1 @@
+scenario,strategy,seed,completed,total_orders,completion_rate,ticks,messages,recoveries,observed_distance,estimated_energy_consumed,charging_sessions,overlap_ticks,mean_order_completion_ticks,initial_total_battery,final_total_battery,robot_1_deliveries,robot_2_deliveries,robot_3_deliveries,workload_std,all_completed

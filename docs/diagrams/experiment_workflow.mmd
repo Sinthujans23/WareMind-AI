@@ -1,0 +1,9 @@
+flowchart TD
+    Scenario[Scenario Generation] --> Strategy[Strategy Selection]
+    Strategy --> Seed[Seed Initialization]
+    Seed --> Sim[500-Tick Simulation]
+    Sim --> Metrics[Metric Collection]
+    Metrics --> CSV[Advanced Comparison CSV]
+    CSV --> Compare[Baseline Comparison]
+    Compare --> Summary[Summary CSV and Markdown]
+    Summary --> Graphs[Performance Graphs]

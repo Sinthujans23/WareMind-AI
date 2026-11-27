@@ -1,0 +1,14 @@
+flowchart LR
+    UI[Pygame UI] --> Model[WarehouseMesaModel]
+    Model --> Warehouse[Warehouse Environment]
+    Warehouse --> Robots[Robot Agents]
+    Warehouse --> Bus[Message Bus]
+    Robots --> CNP[Contract Net Protocol]
+    CNP --> Strategies[Task Allocation Strategies]
+    Strategies --> Safety[Experta Safety Engine]
+    Robots --> Navigation[A* Navigation]
+    Navigation --> Warehouse
+    Model --> Metrics[Metric Collection]
+    Metrics --> CSV[Experiment CSV]
+    CSV --> Analysis[Performance Analysis]
+    Analysis --> Graphs[Matplotlib Graphs]

@@ -177,7 +177,7 @@ python -m pytest -q
 
 Latest verified result:
 
-**35 tests passed.**
+**60 tests passed.**
 
 Tests cover core warehouse operations, navigation, negotiation, robot coordination, battery charging, and recovery behavior.
 

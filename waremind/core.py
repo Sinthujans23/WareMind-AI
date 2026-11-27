@@ -72,6 +72,10 @@ class Robot:
         from .navigation import astar
         from .safety_rules import evaluate_robot_safety
 
+        # Clear the depot before accepting another task.
+        if self.pos == DEPOT:
+            return None
+
         # Step 1: Check robot safety using Experta
         actions = evaluate_robot_safety(
             idle=self.order_id is None,
@@ -103,7 +107,7 @@ class Robot:
             idle=self.order_id is None,
             battery=self.battery,
             charging=self.charging,
-            required_battery=travel + 15,
+            required_battery=(travel * BATTERY_PER_MOVE) + 15,
         )
 
         if "REJECT_NEW_TASK" in actions:
@@ -113,6 +117,145 @@ class Robot:
         return travel + (100 - self.battery) * 0.12
 
 class Warehouse:
+    
+    def resolve_deadlock(self, reserved):
+        """Resolve circular waits caused by occupied task goals."""
+        from .navigation import astar
+
+        robots_by_position = {
+            robot.pos: robot
+            for robot in self.robots
+        }
+
+        goals = {}
+        dependencies = {}
+
+        # Identify stuck robots and their blocking robots.
+        for robot in self.robots:
+
+            if (
+                robot.order_id is None
+                or robot.charging
+                or robot.waiting_ticks < 5
+            ):
+                continue
+
+            order = next(
+                (
+                    o for o in self.orders
+                    if o.id == robot.order_id
+                    and not o.completed
+                ),
+                None,
+            )
+
+            if order is None:
+                continue
+
+            goal = (
+                order.destination
+                if robot.carrying
+                else order.pickup
+            )
+
+            goals[robot.id] = goal
+
+            blocker = robots_by_position.get(goal)
+
+            if blocker is None or blocker.id == robot.id:
+                continue
+
+            ideal_route = astar(
+                robot.pos,
+                goal,
+                self.dynamic_obstacles,
+            )
+
+            if ideal_route:
+                dependencies[robot.id] = blocker.id
+
+        # Detect circular waiting dependencies.
+        cycle = []
+
+        for start in dependencies:
+
+            visited = []
+            current = start
+
+            while current in dependencies:
+
+                if current in visited:
+                    cycle = visited[
+                        visited.index(current):
+                    ]
+                    break
+
+                visited.append(current)
+                current = dependencies[current]
+
+            if cycle:
+                break
+
+        if not cycle:
+            return False
+
+        # Prefer moving a robot that is not carrying goods.
+        candidates = sorted(
+            (
+                robot for robot in self.robots
+                if robot.id in cycle
+                and not robot.charging
+                and robot.battery >= BATTERY_PER_MOVE
+            ),
+            key=lambda robot: (
+                robot.carrying,
+                robot.pos != DEPOT,
+                robot.id,
+            ),
+        )
+
+        protected_cells = {
+            order.pickup
+            for order in self.orders
+            if not order.completed
+        }
+
+        protected_cells.update(goals.values())
+        protected_cells.update({DEPOT, CHARGER})
+
+        for robot in candidates:
+
+            for target in neighbors(robot.pos):
+
+                if target in reserved:
+                    continue
+
+                if target in self.dynamic_obstacles:
+                    continue
+
+                if target in protected_cells:
+                    continue
+
+                # Safely yield to an adjacent empty cell.
+                reserved.remove(robot.pos)
+                robot.pos = target
+                reserved.add(target)
+
+                robot.battery -= BATTERY_PER_MOVE
+                robot.waiting_ticks = 0
+                robot.stuck = False
+
+                self.recovery_count += 1
+
+                self.events.append(
+                    f"Deadlock resolved: "
+                    f"Robot {robot.id} yielded to {target}"
+                )
+
+                return True
+
+        return False
+
     def __init__(self):
         self.robots = [Robot(1, (2, 2)), Robot(2, (13, 2)), Robot(3, (8, 10))]
         self.orders = []
@@ -203,10 +346,11 @@ class Warehouse:
             return True
 
         route = astar(
-            robot.pos,
-            CHARGER,
-            reserved - {robot.pos}
-        )
+    robot.pos,
+    CHARGER,
+    (reserved - {robot.pos})
+    | self.dynamic_obstacles
+)
 
         if len(route) > 1 and route[1] not in reserved:
             reserved.remove(robot.pos)
@@ -486,6 +630,10 @@ class Warehouse:
 
                     # Attempt safe idle-robot repositioning.
                     self.recover_blocked_robot(robot, reserved)
+
+        # Keep only recent events.
+                # Resolve circular waits after normal movement.
+        self.resolve_deadlock(reserved)
 
         # Keep only recent events.
         self.events = self.events[-12:]
